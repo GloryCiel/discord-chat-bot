@@ -1,0 +1,3 @@
+"""
+AI functionality package initialization
+""" 
