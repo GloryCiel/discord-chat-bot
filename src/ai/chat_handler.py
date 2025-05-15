@@ -17,7 +17,7 @@ class ChatHandler:
             raise ValueError("Gemini API key is required")
             
         genai.configure(api_key=settings.gemini_api_key)
-        self.model = genai.GenerativeModel('gemini-pro')
+        self.model = genai.GenerativeModel('gemini-2.0-flash')
         self.chat = self.model.start_chat(history=[])
         
     async def process_message(self, message: str) -> str:
