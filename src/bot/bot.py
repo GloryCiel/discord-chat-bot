@@ -25,6 +25,12 @@ class DiscordBot(discord.Client):
         # Add commands here
         @self.tree.command(name="chat", description="Start a new chat session")
         async def chat(interaction: discord.Interaction):
+            if not self.settings.ai_enabled:
+                await interaction.response.send_message(
+                    "AI 채팅이 비활성화되어 있습니다. 관리자에게 GROQ_API_KEY 설정을 요청하세요.",
+                    ephemeral=True,
+                )
+                return
             user_id = interaction.user.id
             self.active_users.add(user_id)  # 사용자 활성화
             await interaction.response.send_message("이제 AI와 대화할 수 있습니다! (/end로 종료)")
@@ -34,6 +40,9 @@ class DiscordBot(discord.Client):
             user_id = interaction.user.id
             if user_id in self.active_users:
                 self.active_users.remove(user_id)
+                handler = self.chat_handlers.get(interaction.channel_id)
+                if handler:
+                    await handler.reset_chat()
                 await interaction.response.send_message("AI와의 대화가 종료되었습니다. 다시 시작하려면 /chat을 입력하세요.")
             else:
                 await interaction.response.send_message("이미 비활성화되어 있습니다. /chat으로 다시 시작할 수 있습니다.")
@@ -93,4 +102,9 @@ class DiscordBot(discord.Client):
         # Generate and send response
         async with message.channel.typing():
             response = await chat_handler.process_message(message.content)
-            await message.reply(response) 
+            chunks = [response[i:i + 1900] for i in range(0, len(response), 1900)] or [response]
+            for index, chunk in enumerate(chunks):
+                if index == 0:
+                    await message.reply(chunk)
+                else:
+                    await message.channel.send(chunk)

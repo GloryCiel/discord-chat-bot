@@ -1,6 +1,6 @@
 # Discord Chatbot
 
-A Discord chatbot project.
+A Discord chatbot using Groq's free API tier.
 
 ## Description
 This is a prototype Discord bot that uses Discord API.
@@ -11,6 +11,7 @@ This is a prototype Discord bot that uses Discord API.
 
 - Python 3.8 or higher
 - Discord Bot Token
+- Groq API key (free at [Groq Console](https://console.groq.com/keys))
 
 ### How To Install
 
@@ -36,13 +37,17 @@ pip install -r requirements.txt
 4. Create `.env` file and set your Discord Bot Token:
 ```
 DISCORD_TOKEN=your_token_here
+GROQ_API_KEY=your_groq_api_key
+GROQ_MODEL=qwen/qwen3.6-27b
 ```
 
 ### How To Run
 
 ```bash
-python bot.py
+python main.py
 ```
+
+If `GROQ_API_KEY` is omitted, the bot still starts but AI chat commands stay disabled.
 
 ## License
 

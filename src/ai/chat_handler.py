@@ -1,28 +1,25 @@
-"""
-AI chat handling implementation using Google's Gemini API
-"""
-import google.generativeai as genai
-from typing import Optional, Dict, Any, List
+"""AI chat handling implementation using Groq's OpenAI-compatible API."""
+from typing import Dict, Any, List
+
+from groq import AsyncGroq
+
 from src.config.settings import Settings
 
 class ChatHandler:
     def __init__(self, settings: Settings):
-        """
-        Initialize chat handler with Gemini model
-        
-        Args:
-            settings (Settings): Application settings containing API key
-        """
-        if not settings.gemini_api_key:
-            raise ValueError("Gemini API key is required")
-            
-        genai.configure(api_key=settings.gemini_api_key)
-        self.model = genai.GenerativeModel('gemini-2.0-flash')
-        self.chat = self.model.start_chat(history=[])
+        """Initialize a channel-local chat session."""
+        if not settings.groq_api_key:
+            raise ValueError("GROQ_API_KEY is required to use AI chat")
+
+        self.client = AsyncGroq(api_key=settings.groq_api_key)
+        self.model = settings.groq_model
+        self.system_prompt = settings.ai_system_prompt
+        self.history: List[Dict[str, str]] = []
+        self.max_history_messages = 20
         
     async def process_message(self, message: str) -> str:
         """
-        Process user message and generate AI response using Gemini
+        Process a user message and generate an AI response.
         
         Args:
             message (str): User's message
@@ -31,14 +28,32 @@ class ChatHandler:
             str: AI generated response
         """
         try:
-            response = await self.chat.send_message_async(message)
-            return response.text
+            messages = [
+                {"role": "system", "content": self.system_prompt},
+                *self.history,
+                {"role": "user", "content": message},
+            ]
+            completion = await self.client.chat.completions.create(
+                model=self.model,
+                messages=messages,
+                temperature=0.7,
+                max_tokens=1000,
+                reasoning_format="hidden",
+            )
+            response = completion.choices[0].message.content or "응답이 비어 있습니다."
+            self.history.extend([
+                {"role": "user", "content": message},
+                {"role": "assistant", "content": response},
+            ])
+            self.history = self.history[-self.max_history_messages:]
+            return response
         except Exception as e:
-            return f"Error generating response: {str(e)}"
+            print(f"Groq API error: {e}")
+            return "AI 응답을 만드는 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요."
         
     async def reset_chat(self) -> None:
         """Reset the chat history"""
-        self.chat = self.model.start_chat(history=[])
+        self.history.clear()
         
     async def get_chat_history(self) -> List[Dict[str, str]]:
         """
@@ -47,10 +62,7 @@ class ChatHandler:
         Returns:
             List[Dict[str, str]]: List of chat messages with roles and content
         """
-        return [
-            {"role": msg.role, "content": msg.parts[0].text}
-            for msg in self.chat.history
-        ]
+        return list(self.history)
 
     async def train(self, training_data: Dict[str, Any]) -> None:
         """

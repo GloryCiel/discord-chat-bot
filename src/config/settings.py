@@ -13,8 +13,15 @@ class Settings:
         # Discord settings
         self.discord_token: str = os.getenv("DISCORD_TOKEN", "")
         
-        # Gemini API settings
-        self.gemini_api_key: Optional[str] = os.getenv("GEMINI_API_KEY")
+        # AI settings (Groq free tier)
+        self.groq_api_key: Optional[str] = os.getenv("GROQ_API_KEY")
+        self.groq_model: str = os.getenv("GROQ_MODEL", "qwen/qwen3.6-27b")
+        self.ai_system_prompt: str = os.getenv(
+            "AI_SYSTEM_PROMPT",
+            "You are a friendly Discord chatbot. Reply naturally in the user's language. "
+            "Keep answers concise unless the user asks for detail.",
+        )
+        self.ai_enabled: bool = bool(self.groq_api_key)
         
     def validate(self) -> bool:
         """
@@ -25,6 +32,4 @@ class Settings:
         """
         if not self.discord_token:
             raise ValueError("Discord token is required")
-        if not self.gemini_api_key:
-            raise ValueError("Gemini API key is required")
         return True 
