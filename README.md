@@ -49,6 +49,14 @@ python main.py
 
 If `GROQ_API_KEY` is omitted, the bot still starts but AI chat commands stay disabled.
 
+### Synology Container Manager
+
+1. Copy the repository into a NAS shared folder.
+2. Copy `.env.example` to `.env` and fill in `DISCORD_TOKEN` and `GROQ_API_KEY`.
+3. In Container Manager, create a project from `compose.yaml`.
+
+The container runs as an unprivileged user and restarts automatically unless stopped manually.
+
 ## License
 
 Copyright (c) 2024 Gloryciel
