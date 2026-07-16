@@ -9,3 +9,5 @@ services:
       - .env
     volumes:
       - ./secrets/gcp-service-account.json:/run/secrets/gcp-service-account.json:ro
+      - ./main.py:/app/main.py:ro
+      - ./src:/app/src:ro
