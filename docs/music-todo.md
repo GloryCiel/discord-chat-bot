@@ -63,12 +63,14 @@ Track(..., duration_seconds=None).duration_label == "LIVE"
 
 파일: `src/services/music.py`
 
-- [ ] `MusicService.get_player(guild_id)` 구현
-- [ ] 서버별 플레이어가 서로 다른 큐를 갖는지 확인
-- [ ] `GuildMusicPlayer.enqueue()` 구현
-- [ ] 현재 곡과 대기열 목록 조회 구현
-- [ ] 큐 최대 길이 결정(권장: 50곡)
-- [ ] 동일 서버의 동시 명령을 보호할 `asyncio.Lock` 사용
+- [x] `MusicService.get_player(guild_id)` 구현
+- [x] 서버별 플레이어가 서로 다른 큐를 갖는지 확인
+- [x] `GuildMusicPlayer.enqueue()` 구현
+- [x] 현재 곡과 대기열 목록 조회 구현
+- [x] 큐 최대 길이 결정(50곡)
+- [x] 동일 서버의 동시 명령을 보호할 `asyncio.Lock` 사용
+- [x] 동일한 곡의 중복 추가 허용
+- [x] 큐는 메모리에만 유지하고 봇 재시작 시 초기화
 
 완료 조건:
 
