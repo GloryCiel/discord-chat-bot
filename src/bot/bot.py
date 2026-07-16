@@ -179,6 +179,29 @@ class DiscordBot(discord.Client):
     async def on_ready(self) -> None:
         """Called when the bot is ready and connected to Discord"""
         print(f"Logged in as {self.user.name} (ID: {self.user.id})")
+        if self.server_controller:
+            print(
+                "GCP server control enabled: "
+                f"{self.settings.gcp_project_id}/"
+                f"{self.settings.gcp_zone}/"
+                f"{self.settings.gcp_instance_name}"
+            )
+        else:
+            print("GCP server control disabled: required settings are missing")
+
+        # Global Discord commands can take time to propagate. The bot is used in
+        # a small number of private servers, so also sync a guild-local copy for
+        # immediate availability without requiring a configured guild ID.
+        for guild in self.guilds:
+            try:
+                self.tree.copy_global_to(guild=guild)
+                synced = await self.tree.sync(guild=guild)
+                print(
+                    f"Synced {len(synced)} commands to "
+                    f"{guild.name} (ID: {guild.id})"
+                )
+            except Exception as exc:
+                print(f"Discord command sync failed for guild {guild.id}: {exc}")
         print("------")
         
     async def get_chat_handler(self, channel_id: int) -> ChatHandler:
