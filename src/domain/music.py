@@ -22,5 +22,8 @@ class Track:
     @property
     def duration_label(self) -> str:
         """Return a user-facing duration such as ``3:05`` or ``LIVE``."""
-        # TODO(MUSIC-1): Convert duration_seconds to M:SS. Return LIVE for None.
-        raise NotImplementedError("TODO(MUSIC-1): format the track duration")
+        if self.duration_seconds is None:
+            return "LIVE"
+        minute,second = divmod(self.duration_seconds, 60)
+        return f"{minute}:{second:02d}"
+

@@ -31,10 +31,10 @@ MusicCog
 
 파일: `src/domain/music.py`
 
-- [ ] `Track`의 각 필드가 필요한 이유 확인
-- [ ] `duration_label`에서 초를 `분:초` 형식으로 변환
-- [ ] 라이브 방송처럼 재생 시간이 없는 경우 `LIVE` 반환
-- [ ] `tests/test_music_domain.py` 테스트 통과
+- [x] `Track`의 각 필드가 필요한 이유 확인
+- [x] `duration_label`에서 초를 `분:초` 형식으로 변환
+- [x] 라이브 방송처럼 재생 시간이 없는 경우 `LIVE` 반환
+- [x] `tests/test_music_domain.py` 테스트 통과
 
 완료 조건:
 

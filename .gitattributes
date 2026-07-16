@@ -1,0 +1,6 @@
+# 코드와 설정 파일은 모든 OS에서 LF 사용
+* text=auto eol=lf
+
+# Windows 실행 스크립트만 CRLF 사용
+*.bat text eol=crlf
+*.cmd text eol=crlf
