@@ -1,6 +1,6 @@
 # Discord Chat Bot
 
-개인 Discord 서버에서 사용하는 Groq AI 챗봇이자 Palworld GCP VM 제어 봇입니다.
+개인 Discord 서버에서 사용하는 Groq AI 챗봇이자 Palworld GCP VM 제어·음악 재생 봇입니다.
 
 ## 명령어
 
@@ -10,6 +10,12 @@
 - `/pal_server_status`: Palworld VM 상태 확인
 - `/pal_server_start`: Palworld VM 시작
 - `/pal_server_stop confirm:True`: 저장 종료 및 VM 정지 요청
+- `/music_play query:<검색어 또는 URL>`: 음성 채널에서 음악 재생 또는 큐 추가
+- `/music_pause`, `/music_resume`: 음악 일시정지·재개
+- `/music_skip`: 현재 곡 건너뛰기
+- `/music_queue`: 현재 곡과 대기열 표시
+- `/music_stop`: 재생 중단 및 대기열 초기화
+- `/music_leave`: 재생 중단 후 음성 채널 퇴장
 
 ## 구조
 
@@ -17,8 +23,8 @@
 src/
 ├─ bot/         # Discord 앱 생성과 명령어 동기화
 ├─ cogs/        # Discord 명령어와 이벤트
-├─ services/    # AI 세션 및 Palworld 유스케이스
-├─ integrations/ # Groq 등 외부 API 어댑터
+├─ services/    # AI 세션, Palworld 및 음악 재생 유스케이스
+├─ integrations/ # Groq·yt-dlp 등 외부 API 어댑터
 ├─ cloud/       # GCP Compute Engine 연동
 ├─ ai/          # Groq 대화 처리
 ├─ security/    # 명령어 접근 정책
@@ -68,13 +74,19 @@ pip install -r requirements.txt
 python main.py
 ```
 
+음악 재생에는 시스템 FFmpeg가 필요합니다. Docker 이미지에는 FFmpeg가 자동으로
+설치됩니다.
+
 ## Synology Container Manager
 
 1. 저장소 파일을 NAS의 프로젝트 폴더에 복사합니다.
 2. `.env`와 `secrets/gcp-service-account.json`을 준비합니다.
 3. `compose.yaml`로 Container Manager 프로젝트를 생성합니다.
 
-`main.py`와 `src`는 컨테이너에 읽기 전용으로 마운트됩니다. Python 코드만 수정한 경우에는 이미지 재빌드 없이 컨테이너를 재시작하면 적용됩니다. `requirements.txt` 또는 `Dockerfile`이 변경된 경우에는 이미지를 다시 빌드해야 합니다.
+`main.py`와 `src`는 컨테이너에 읽기 전용으로 마운트됩니다. Python 코드만 수정한
+경우에는 이미지 재빌드 없이 컨테이너를 재시작하면 적용됩니다. `requirements.txt`
+또는 `Dockerfile`이 변경된 경우에는 이미지를 다시 빌드해야 합니다. 음악 기능을
+처음 배포할 때는 FFmpeg와 Discord 음성 패키지 설치를 위해 반드시 재빌드합니다.
 
 ## 테스트
 
