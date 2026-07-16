@@ -97,14 +97,14 @@ MUSIC-5의 음성 의존성 설치와 MUSIC-7의 Cog 장착 후 통합 테스트
 
 파일: `src/services/music.py`
 
-- [ ] `Dockerfile`에 FFmpeg 설치 추가
-- [ ] `requirements.txt`의 Discord 항목을 `discord.py[voice]`로 변경
-- [ ] 재생 직전에 `MediaExtractor.get_stream_url()` 호출
-- [ ] `discord.FFmpegOpusAudio` 또는 `FFmpegPCMAudio` 생성
-- [ ] `VoiceClient.play()` 호출
-- [ ] `after` 콜백에서 이벤트 루프로 안전하게 복귀
-- [ ] 한 곡 종료 후 다음 곡 자동 재생
-- [ ] FFmpeg 오류를 로그에 남기고 다음 곡으로 진행
+- [x] `Dockerfile`에 FFmpeg 설치 추가
+- [x] `requirements.txt`의 Discord 항목을 `discord.py[voice]`로 변경
+- [x] 재생 직전에 `MediaExtractor.get_stream_url()` 호출
+- [x] `discord.FFmpegOpusAudio` 생성
+- [x] `VoiceClient.play()` 호출
+- [x] `after` 콜백에서 이벤트 루프로 안전하게 복귀
+- [x] 한 곡 종료 후 다음 곡 자동 재생
+- [x] FFmpeg·추출 오류를 로그에 남기고 다음 곡으로 진행
 
 `VoiceClient.play()`의 `after` 콜백은 별도 스레드에서 실행될 수 있으므로 `loop.call_soon_threadsafe()` 또는 `asyncio.run_coroutine_threadsafe()`를 사용해야 합니다.
 

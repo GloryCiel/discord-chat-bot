@@ -19,10 +19,18 @@ class FakeMediaExtractor:
 
 
 class FakeVoiceClient:
-    def __init__(self, channel: "FakeVoiceChannel", connected: bool = True):
+    def __init__(
+        self,
+        channel: "FakeVoiceChannel",
+        connected: bool = True,
+        auto_finish: bool = True,
+    ):
         self.channel = channel
         self.connected = connected
+        self.auto_finish = auto_finish
         self.moves: list[FakeVoiceChannel] = []
+        self.sources: list[FakeAudioSource] = []
+        self.after_callbacks = []
 
     def is_connected(self) -> bool:
         return self.connected
@@ -30,6 +38,26 @@ class FakeVoiceClient:
     async def move_to(self, channel: "FakeVoiceChannel") -> None:
         self.channel = channel
         self.moves.append(channel)
+
+    def play(self, source: "FakeAudioSource", *, after=None) -> None:
+        self.sources.append(source)
+        self.after_callbacks.append(after)
+        if self.auto_finish and after is not None:
+            asyncio.get_running_loop().call_soon(after, None)
+
+    def finish(self, error: Exception | None = None) -> None:
+        callback = self.after_callbacks[-1]
+        if callback is not None:
+            callback(error)
+
+
+class FakeAudioSource:
+    def __init__(self, stream_url: str):
+        self.stream_url = stream_url
+        self.cleaned = False
+
+    def cleanup(self) -> None:
+        self.cleaned = True
 
 
 class FakeVoiceChannel:
@@ -45,7 +73,18 @@ class FakeVoiceChannel:
 
 class MusicServiceTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self) -> None:
-        self.service = MusicService(FakeMediaExtractor(), max_queue_size=2)
+        self.created_sources: list[FakeAudioSource] = []
+
+        def create_source(stream_url: str) -> FakeAudioSource:
+            source = FakeAudioSource(stream_url)
+            self.created_sources.append(source)
+            return source
+
+        self.service = MusicService(
+            FakeMediaExtractor(),
+            max_queue_size=2,
+            audio_source_factory=create_source,
+        )
 
     def test_returns_one_persistent_player_per_guild(self) -> None:
         first = self.service.get_player(1)
@@ -157,3 +196,74 @@ class MusicServiceTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(await self.service.connected_channel_id(1), 10)
         self.assertEqual(await self.service.connected_channel_id(2), 20)
+
+    async def test_playback_worker_plays_queue_in_fifo_order(self) -> None:
+        channel = FakeVoiceChannel(10)
+        await self.service.connect(1, channel)
+        await self.service.enqueue(1, "first", 100)
+        await self.service.enqueue(1, "second", 100)
+
+        started = await self.service.start_playback(1)
+        playback_task = self.service.get_player(1).playback_task
+        self.assertIsNotNone(playback_task)
+        await playback_task
+
+        self.assertTrue(started)
+        self.assertEqual(
+            [source.stream_url for source in channel.client.sources],
+            [
+                "https://media.example.com/first",
+                "https://media.example.com/second",
+            ],
+        )
+        snapshot = await self.service.queue_snapshot(1)
+        self.assertIsNone(snapshot.current)
+        self.assertEqual(snapshot.queued, ())
+        self.assertIsNone(self.service.get_player(1).playback_task)
+
+    async def test_start_playback_requires_connection_and_queued_track(self) -> None:
+        self.assertFalse(await self.service.start_playback(1))
+
+        channel = FakeVoiceChannel(10)
+        await self.service.connect(1, channel)
+
+        self.assertFalse(await self.service.start_playback(1))
+
+    async def test_does_not_start_second_worker_for_same_guild(self) -> None:
+        channel = FakeVoiceChannel(10)
+        channel.client.auto_finish = False
+        await self.service.connect(1, channel)
+        await self.service.enqueue(1, "first", 100)
+
+        self.assertTrue(await self.service.start_playback(1))
+        await asyncio.sleep(0)
+        self.assertFalse(await self.service.start_playback(1))
+
+        playback_task = self.service.get_player(1).playback_task
+        channel.client.finish()
+        self.assertIsNotNone(playback_task)
+        await playback_task
+
+    async def test_playback_error_skips_to_next_track(self) -> None:
+        class FailingExtractor(FakeMediaExtractor):
+            async def get_stream_url(self, track: Track) -> str:
+                if track.title == "broken":
+                    raise RuntimeError("extraction failed")
+                return await super().get_stream_url(track)
+
+        self.service.extractor = FailingExtractor()
+        channel = FakeVoiceChannel(10)
+        await self.service.connect(1, channel)
+        await self.service.enqueue(1, "broken", 100)
+        await self.service.enqueue(1, "working", 100)
+
+        with self.assertLogs("src.services.music", level="ERROR"):
+            self.assertTrue(await self.service.start_playback(1))
+            playback_task = self.service.get_player(1).playback_task
+            self.assertIsNotNone(playback_task)
+            await playback_task
+
+        self.assertEqual(
+            [source.stream_url for source in channel.client.sources],
+            ["https://media.example.com/working"],
+        )
