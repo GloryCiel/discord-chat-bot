@@ -28,7 +28,8 @@ class DiscordBot(discord.Client):
                 print(f"GCP server control disabled: {exc}")
 
     def can_control_server(self, interaction: discord.Interaction) -> bool:
-        if interaction.guild_id != self.settings.discord_control_guild_id:
+        allowed_guild_id = self.settings.discord_control_guild_id
+        if allowed_guild_id and interaction.guild_id != allowed_guild_id:
             return False
 
         user_id = interaction.user.id

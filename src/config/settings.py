@@ -46,7 +46,6 @@ class Settings:
             self.gcp_project_id,
             self.gcp_zone,
             self.gcp_instance_name,
-            self.discord_control_guild_id,
         ])
 
     @staticmethod
