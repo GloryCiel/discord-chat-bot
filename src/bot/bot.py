@@ -5,6 +5,7 @@ import discord
 from discord import app_commands
 from typing import Optional, Dict
 from src.ai.chat_handler import ChatHandler
+from src.cloud.gcp_instance import GcpInstanceController, InstanceState
 from src.config.settings import Settings
 
 class DiscordBot(discord.Client):
@@ -19,6 +20,59 @@ class DiscordBot(discord.Client):
         self.chat_handlers: Dict[int, ChatHandler] = {}  # channel_id -> ChatHandler
         self.tree = app_commands.CommandTree(self)
         self.active_users = set()  # 활성화된 사용자 ID 저장
+        self.server_controller: Optional[GcpInstanceController] = None
+        if self.settings.server_control_enabled:
+            try:
+                self.server_controller = GcpInstanceController(self.settings)
+            except Exception as exc:
+                print(f"GCP server control disabled: {exc}")
+
+    def can_control_server(self, interaction: discord.Interaction) -> bool:
+        if interaction.guild_id != self.settings.discord_control_guild_id:
+            return False
+
+        user_id = interaction.user.id
+        restricted_users = self.settings.discord_control_user_ids
+        restricted_roles = self.settings.discord_control_role_ids
+        if not restricted_users and not restricted_roles:
+            return True
+        if user_id in restricted_users:
+            return True
+        if isinstance(interaction.user, discord.Member):
+            if interaction.user.guild_permissions.administrator:
+                return True
+            return bool(
+                {role.id for role in interaction.user.roles} & restricted_roles
+            )
+        return False
+
+    async def require_server_control(
+        self, interaction: discord.Interaction
+    ) -> bool:
+        if not self.server_controller:
+            await interaction.response.send_message(
+                "팰월드 서버 제어가 아직 구성되지 않았습니다.", ephemeral=True
+            )
+            return False
+        if not self.can_control_server(interaction):
+            await interaction.response.send_message(
+                "이 서버를 제어할 권한이 없습니다.", ephemeral=True
+            )
+            return False
+        return True
+
+    @staticmethod
+    def format_instance_state(state: InstanceState) -> str:
+        labels = {
+            "RUNNING": "실행 중",
+            "TERMINATED": "꺼짐",
+            "STOPPING": "종료 중",
+            "STAGING": "시작 준비 중",
+            "PROVISIONING": "프로비저닝 중",
+        }
+        status = labels.get(state.status, state.status)
+        address = f"\n접속 주소: `{state.external_ip}:8211`" if state.external_ip else ""
+        return f"VM 상태: **{status}**{address}"
         
     async def setup_hook(self) -> None:
         """Initialize bot commands and other setup tasks"""
@@ -59,6 +113,61 @@ class DiscordBot(discord.Client):
             `/chat` 명령어를 사용한 사용자만 AI와 대화할 수 있습니다.
             """
             await interaction.response.send_message(help_text)
+
+        @self.tree.command(name="팰서버-상태", description="팰월드 GCP 서버 상태를 확인합니다")
+        async def pal_server_status(interaction: discord.Interaction):
+            if not await self.require_server_control(interaction):
+                return
+            await interaction.response.defer(thinking=True)
+            try:
+                state = await self.server_controller.get()
+                await interaction.followup.send(self.format_instance_state(state))
+            except Exception as exc:
+                print(f"GCP status error: {exc}")
+                await interaction.followup.send("GCP 서버 상태 확인에 실패했습니다.")
+
+        @self.tree.command(name="팰서버-시작", description="팰월드 GCP 서버를 시작합니다")
+        async def pal_server_start(interaction: discord.Interaction):
+            if not await self.require_server_control(interaction):
+                return
+            await interaction.response.defer(thinking=True)
+            try:
+                before = await self.server_controller.get()
+                state = await self.server_controller.start()
+                prefix = "이미 실행 중입니다.\n" if before.status == "RUNNING" else (
+                    "VM을 시작했습니다. 팰월드 업데이트와 서버 시작에 1~3분 정도 걸릴 수 있습니다.\n"
+                )
+                await interaction.followup.send(
+                    prefix + self.format_instance_state(state)
+                )
+            except Exception as exc:
+                print(f"GCP start error: {exc}")
+                await interaction.followup.send("GCP 서버 시작에 실패했습니다.")
+
+        @self.tree.command(name="팰서버-종료", description="팰월드를 저장하고 GCP 서버를 종료합니다")
+        @app_commands.describe(confirm="접속자가 모두 나갔고 종료해도 되면 체크")
+        async def pal_server_stop(
+            interaction: discord.Interaction, confirm: bool = False
+        ):
+            if not await self.require_server_control(interaction):
+                return
+            if not confirm:
+                await interaction.response.send_message(
+                    "종료하지 않았습니다. 접속자가 모두 나갔는지 확인한 뒤 "
+                    "`confirm`을 `True`로 선택해 다시 실행하세요.",
+                    ephemeral=True,
+                )
+                return
+            await interaction.response.defer(thinking=True)
+            try:
+                state = await self.server_controller.stop()
+                await interaction.followup.send(
+                    "팰월드 저장 종료를 요청했고 VM이 꺼졌습니다.\n"
+                    + self.format_instance_state(state)
+                )
+            except Exception as exc:
+                print(f"GCP stop error: {exc}")
+                await interaction.followup.send("GCP 서버 종료에 실패했습니다.")
         
         # Sync commands with Discord
         await self.tree.sync()
