@@ -4,21 +4,28 @@ This Cog is intentionally not loaded by ``DiscordBot`` yet. Complete
 TODO(MUSIC-1) through TODO(MUSIC-6), then load it in TODO(MUSIC-7).
 """
 
+import logging
+
 import discord
 from discord import app_commands
 from discord.ext import commands
 
-from src.services.music import MusicService
+from src.domain.music import Track
+from src.integrations.media_extractor import MediaExtractionError
+from src.services.music import MusicQueueFullError, MusicService
+
+logger = logging.getLogger(__name__)
+QUEUE_PREVIEW_LIMIT = 10
 
 
 class MusicCog(commands.Cog):
     def __init__(self, service: MusicService):
         self.service = service
 
-    async def _not_ready(self, interaction: discord.Interaction) -> None:
-        await interaction.response.send_message(
-            "음악 기능을 구현하는 중입니다.", ephemeral=True
-        )
+    @staticmethod
+    def _format_track(track: Track) -> str:
+        title = discord.utils.escape_markdown(track.title)
+        return f"**{title}** (`{track.duration_label}`)"
 
     async def _user_voice_channel(
         self, interaction: discord.Interaction
@@ -102,49 +109,121 @@ class MusicCog(commands.Cog):
             )
             return
 
-        await self.service.connect(interaction.guild.id, channel)
-        # TODO(MUSIC-6): Defer, enqueue, and display the Track metadata.
-        await self._not_ready(interaction)
+        await interaction.response.defer(thinking=True)
+        try:
+            await self.service.connect(interaction.guild.id, channel)
+            result = await self.service.enqueue(
+                interaction.guild.id,
+                query,
+                interaction.user.id,
+            )
+            started = await self.service.start_playback(interaction.guild.id)
+        except (MediaExtractionError, MusicQueueFullError) as exc:
+            await interaction.followup.send(str(exc), ephemeral=True)
+            return
+        except Exception:
+            logger.exception(
+                "Music play command failed in guild %s", interaction.guild.id
+            )
+            await interaction.followup.send(
+                "음악을 준비하지 못했습니다. 잠시 후 다시 시도해 주세요.",
+                ephemeral=True,
+            )
+            return
+
+        track_label = self._format_track(result.track)
+        if started:
+            message = f"▶️ 재생을 시작합니다: {track_label}"
+        else:
+            message = f"➕ 대기열 {result.position}번에 추가했습니다: {track_label}"
+        await interaction.followup.send(message)
 
     @app_commands.command(name="music_pause", description="현재 음악을 일시정지합니다")
     async def pause(self, interaction: discord.Interaction) -> None:
-        # TODO(MUSIC-6): Pause only when the guild is currently playing.
-        if await self._require_same_voice_channel(interaction):
-            await self._not_ready(interaction)
+        if not await self._require_same_voice_channel(interaction):
+            return
+        if await self.service.pause(interaction.guild.id):
+            message = "⏸️ 음악을 일시정지했습니다."
+        else:
+            message = "현재 재생 중인 음악이 없습니다."
+        await interaction.response.send_message(message, ephemeral=True)
 
     @app_commands.command(
         name="music_resume", description="일시정지한 음악을 다시 재생합니다"
     )
     async def resume(self, interaction: discord.Interaction) -> None:
-        # TODO(MUSIC-6): Resume only when the guild is paused.
-        if await self._require_same_voice_channel(interaction):
-            await self._not_ready(interaction)
+        if not await self._require_same_voice_channel(interaction):
+            return
+        if await self.service.resume(interaction.guild.id):
+            message = "▶️ 음악을 다시 재생합니다."
+        else:
+            message = "일시정지된 음악이 없습니다."
+        await interaction.response.send_message(message, ephemeral=True)
 
     @app_commands.command(name="music_skip", description="현재 음악을 건너뜁니다")
     async def skip(self, interaction: discord.Interaction) -> None:
-        # TODO(MUSIC-6): Stop the current source and advance the queue once.
-        if await self._require_same_voice_channel(interaction):
-            await self._not_ready(interaction)
+        if not await self._require_same_voice_channel(interaction):
+            return
+        skipped = await self.service.skip(interaction.guild.id)
+        if skipped is None:
+            message = "건너뛸 음악이 없습니다."
+        else:
+            message = f"⏭️ 건너뛰었습니다: {self._format_track(skipped)}"
+        await interaction.response.send_message(message)
 
     @app_commands.command(
         name="music_queue", description="현재 음악 대기열을 표시합니다"
     )
     async def show_queue(self, interaction: discord.Interaction) -> None:
-        # TODO(MUSIC-6): Show current Track and a bounded queue preview.
-        await self._not_ready(interaction)
+        if interaction.guild is None:
+            await interaction.response.send_message(
+                "서버 안에서만 사용할 수 있는 명령어입니다.", ephemeral=True
+            )
+            return
+
+        snapshot = await self.service.queue_snapshot(interaction.guild.id)
+        if snapshot.current is None and not snapshot.queued:
+            await interaction.response.send_message("음악 대기열이 비어 있습니다.")
+            return
+
+        lines = ["**음악 대기열**"]
+        if snapshot.current is not None:
+            lines.append(f"지금 재생: {self._format_track(snapshot.current)}")
+        else:
+            lines.append("지금 재생: 없음")
+
+        if snapshot.queued:
+            lines.append("")
+            lines.extend(
+                f"{index}. {self._format_track(track)}"
+                for index, track in enumerate(
+                    snapshot.queued[:QUEUE_PREVIEW_LIMIT], start=1
+                )
+            )
+            remaining = len(snapshot.queued) - QUEUE_PREVIEW_LIMIT
+            if remaining > 0:
+                lines.append(f"…외 {remaining}곡")
+        await interaction.response.send_message("\n".join(lines))
 
     @app_commands.command(
         name="music_stop", description="재생을 중단하고 대기열을 비웁니다"
     )
     async def stop(self, interaction: discord.Interaction) -> None:
-        # TODO(MUSIC-6): Stop playback but keep the voice connection.
-        if await self._require_same_voice_channel(interaction):
-            await self._not_ready(interaction)
+        if not await self._require_same_voice_channel(interaction):
+            return
+        if await self.service.stop(interaction.guild.id):
+            message = "⏹️ 재생을 중단하고 대기열을 비웠습니다."
+        else:
+            message = "중단할 음악이 없습니다."
+        await interaction.response.send_message(message)
 
     @app_commands.command(
         name="music_leave", description="재생을 중단하고 음성 채널에서 나갑니다"
     )
     async def leave(self, interaction: discord.Interaction) -> None:
-        # TODO(MUSIC-6): Clear the guild player and disconnect VoiceClient.
-        if await self._require_same_voice_channel(interaction):
-            await self._not_ready(interaction)
+        if not await self._require_same_voice_channel(interaction):
+            return
+        await self.service.leave(interaction.guild.id)
+        await interaction.response.send_message(
+            "👋 재생을 중단하고 음성 채널에서 나갔습니다."
+        )

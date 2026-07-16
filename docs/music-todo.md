@@ -112,14 +112,14 @@ MUSIC-5의 음성 의존성 설치와 MUSIC-7의 Cog 장착 후 통합 테스트
 
 파일: `src/cogs/music.py`
 
-- [ ] `/music_play`: 검색 후 큐 추가, 필요하면 재생 시작
-- [ ] `/music_queue`: 현재 곡과 다음 곡 목록 표시
-- [ ] `/music_pause`: 현재 재생 일시정지
-- [ ] `/music_resume`: 일시정지 해제
-- [ ] `/music_skip`: 현재 곡 중단 후 다음 곡 재생
-- [ ] `/music_stop`: 현재 곡과 큐 초기화
-- [ ] `/music_leave`: 재생 중단, 큐 초기화, 음성 채널 퇴장
-- [ ] Discord 응답이 3초를 넘길 수 있는 명령은 먼저 `defer()` 호출
+- [x] `/music_play`: 검색 후 큐 추가, 필요하면 재생 시작
+- [x] `/music_queue`: 현재 곡과 다음 10곡 표시
+- [x] `/music_pause`: 현재 재생 일시정지
+- [x] `/music_resume`: 일시정지 해제
+- [x] `/music_skip`: 현재 곡 중단 후 다음 곡 재생
+- [x] `/music_stop`: 현재 곡과 큐 초기화
+- [x] `/music_leave`: 재생 중단, 큐 초기화, 음성 채널 퇴장
+- [x] Discord 응답이 3초를 넘길 수 있는 `/music_play`는 먼저 `defer()` 호출
 
 ## 7. 봇에 Cog 장착 — MUSIC-7
 

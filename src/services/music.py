@@ -1,6 +1,7 @@
 """Per-guild music queues and playback orchestration."""
 
 import asyncio
+import contextlib
 import logging
 from collections import deque
 from collections.abc import Callable
@@ -51,6 +52,18 @@ class VoiceClient(Protocol):
         *,
         after: Callable[[Exception | None], Any] | None = None,
     ) -> None: ...
+
+    def is_playing(self) -> bool: ...
+
+    def is_paused(self) -> bool: ...
+
+    def pause(self) -> None: ...
+
+    def resume(self) -> None: ...
+
+    def stop(self) -> None: ...
+
+    async def disconnect(self, *, force: bool = False) -> None: ...
 
 
 class MusicQueueFullError(RuntimeError):
@@ -240,4 +253,79 @@ class MusicService:
             raise
         await finished.wait()
 
-    # TODO(MUSIC-6): Implement pause, resume, skip, stop, and leave.
+    async def pause(self, guild_id: int) -> bool:
+        """Pause active playback for one guild."""
+        player = self.get_player(guild_id)
+        async with player.lock:
+            voice_client = player.voice_client
+            if voice_client is None or not voice_client.is_playing():
+                return False
+            voice_client.pause()
+            return True
+
+    async def resume(self, guild_id: int) -> bool:
+        """Resume paused playback for one guild."""
+        player = self.get_player(guild_id)
+        async with player.lock:
+            voice_client = player.voice_client
+            if voice_client is None or not voice_client.is_paused():
+                return False
+            voice_client.resume()
+            return True
+
+    async def skip(self, guild_id: int) -> Track | None:
+        """Skip the current track and continue with the remaining queue."""
+        player = self.get_player(guild_id)
+        async with player.lock:
+            track = player.current
+            task = player.playback_task
+            voice_client = player.voice_client
+            if track is None or task is None or task.done():
+                return None
+
+        if voice_client is not None and (
+            voice_client.is_playing() or voice_client.is_paused()
+        ):
+            voice_client.stop()
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+        await self.start_playback(guild_id)
+        return track
+
+    async def stop(self, guild_id: int) -> bool:
+        """Stop playback and clear the guild queue, keeping voice connected."""
+        player = self.get_player(guild_id)
+        async with player.lock:
+            had_music = bool(
+                player.current
+                or player.queue
+                or (
+                    player.playback_task is not None and not player.playback_task.done()
+                )
+            )
+            player.queue.clear()
+            task = player.playback_task
+            voice_client = player.voice_client
+
+        if voice_client is not None and (
+            voice_client.is_playing() or voice_client.is_paused()
+        ):
+            voice_client.stop()
+        if task is not None and not task.done():
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+        return had_music
+
+    async def leave(self, guild_id: int) -> bool:
+        """Clear playback state and disconnect the guild voice client."""
+        await self.stop(guild_id)
+        player = self.get_player(guild_id)
+        async with player.lock:
+            voice_client = player.voice_client
+            player.voice_client = None
+        if voice_client is None or not voice_client.is_connected():
+            return False
+        await voice_client.disconnect(force=True)
+        return True

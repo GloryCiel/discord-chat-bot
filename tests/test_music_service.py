@@ -28,6 +28,9 @@ class FakeVoiceClient:
         self.channel = channel
         self.connected = connected
         self.auto_finish = auto_finish
+        self.playing = False
+        self.paused = False
+        self.disconnected = False
         self.moves: list[FakeVoiceChannel] = []
         self.sources: list[FakeAudioSource] = []
         self.after_callbacks = []
@@ -40,15 +43,41 @@ class FakeVoiceClient:
         self.moves.append(channel)
 
     def play(self, source: "FakeAudioSource", *, after=None) -> None:
+        self.playing = True
+        self.paused = False
         self.sources.append(source)
         self.after_callbacks.append(after)
-        if self.auto_finish and after is not None:
-            asyncio.get_running_loop().call_soon(after, None)
+        if self.auto_finish:
+            asyncio.get_running_loop().call_soon(self.finish)
 
     def finish(self, error: Exception | None = None) -> None:
+        self.playing = False
+        self.paused = False
         callback = self.after_callbacks[-1]
         if callback is not None:
             callback(error)
+
+    def is_playing(self) -> bool:
+        return self.playing
+
+    def is_paused(self) -> bool:
+        return self.paused
+
+    def pause(self) -> None:
+        self.playing = False
+        self.paused = True
+
+    def resume(self) -> None:
+        self.playing = True
+        self.paused = False
+
+    def stop(self) -> None:
+        if self.playing or self.paused:
+            self.finish()
+
+    async def disconnect(self, *, force: bool = False) -> None:
+        self.connected = False
+        self.disconnected = True
 
 
 class FakeAudioSource:
@@ -267,3 +296,80 @@ class MusicServiceTests(unittest.IsolatedAsyncioTestCase):
             [source.stream_url for source in channel.client.sources],
             ["https://media.example.com/working"],
         )
+
+    async def test_pause_and_resume_active_playback(self) -> None:
+        channel = FakeVoiceChannel(10)
+        channel.client.auto_finish = False
+        await self.service.connect(1, channel)
+        await self.service.enqueue(1, "first", 100)
+        await self.service.start_playback(1)
+        await asyncio.sleep(0)
+
+        self.assertTrue(await self.service.pause(1))
+        self.assertTrue(channel.client.is_paused())
+        self.assertFalse(await self.service.pause(1))
+
+        self.assertTrue(await self.service.resume(1))
+        self.assertTrue(channel.client.is_playing())
+        self.assertFalse(await self.service.resume(1))
+
+        await self.service.stop(1)
+
+    async def test_skip_advances_to_next_track(self) -> None:
+        channel = FakeVoiceChannel(10)
+        channel.client.auto_finish = False
+        await self.service.connect(1, channel)
+        await self.service.enqueue(1, "first", 100)
+        await self.service.enqueue(1, "second", 100)
+        await self.service.start_playback(1)
+        await asyncio.sleep(0)
+
+        skipped = await self.service.skip(1)
+        await asyncio.sleep(0)
+
+        self.assertIsNotNone(skipped)
+        self.assertEqual(skipped.title, "first")
+        self.assertEqual(
+            [source.stream_url for source in channel.client.sources],
+            [
+                "https://media.example.com/first",
+                "https://media.example.com/second",
+            ],
+        )
+        snapshot = await self.service.queue_snapshot(1)
+        self.assertIsNotNone(snapshot.current)
+        self.assertEqual(snapshot.current.title, "second")
+        await self.service.stop(1)
+
+    async def test_stop_clears_queue_and_keeps_connection(self) -> None:
+        channel = FakeVoiceChannel(10)
+        channel.client.auto_finish = False
+        await self.service.connect(1, channel)
+        await self.service.enqueue(1, "first", 100)
+        await self.service.enqueue(1, "second", 100)
+        await self.service.start_playback(1)
+        await asyncio.sleep(0)
+
+        self.assertTrue(await self.service.stop(1))
+
+        snapshot = await self.service.queue_snapshot(1)
+        self.assertIsNone(snapshot.current)
+        self.assertEqual(snapshot.queued, ())
+        self.assertTrue(channel.client.is_connected())
+        self.assertIsNone(self.service.get_player(1).playback_task)
+        self.assertFalse(await self.service.stop(1))
+
+    async def test_leave_stops_and_disconnects(self) -> None:
+        channel = FakeVoiceChannel(10)
+        channel.client.auto_finish = False
+        await self.service.connect(1, channel)
+        await self.service.enqueue(1, "first", 100)
+        await self.service.start_playback(1)
+        await asyncio.sleep(0)
+
+        self.assertTrue(await self.service.leave(1))
+
+        self.assertTrue(channel.client.disconnected)
+        self.assertIsNone(self.service.get_player(1).voice_client)
+        self.assertIsNone(await self.service.connected_channel_id(1))
+        self.assertFalse(await self.service.leave(1))
