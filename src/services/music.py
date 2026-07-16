@@ -17,6 +17,7 @@ logger = logging.getLogger(__name__)
 
 FFMPEG_BEFORE_OPTIONS = "-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5"
 FFMPEG_OPTIONS = "-vn -loglevel warning"
+DEFAULT_IDLE_TIMEOUT_SECONDS = 300.0
 AudioSourceFactory = Callable[[str], discord.AudioSource]
 
 
@@ -94,6 +95,7 @@ class GuildMusicPlayer:
     current: Track | None = None
     voice_client: VoiceClient | None = None
     playback_task: asyncio.Task[None] | None = None
+    idle_disconnect_task: asyncio.Task[None] | None = None
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
     async def enqueue(self, track: Track) -> int:
@@ -101,6 +103,9 @@ class GuildMusicPlayer:
         async with self.lock:
             if len(self.queue) >= self.max_queue_size:
                 raise MusicQueueFullError(self.max_queue_size)
+            if self.idle_disconnect_task is not None:
+                self.idle_disconnect_task.cancel()
+                self.idle_disconnect_task = None
             self.queue.append(track)
             return len(self.queue)
 
@@ -120,12 +125,16 @@ class MusicService:
         extractor: MediaExtractor,
         max_queue_size: int = 50,
         audio_source_factory: AudioSourceFactory = create_audio_source,
+        idle_timeout_seconds: float = DEFAULT_IDLE_TIMEOUT_SECONDS,
     ):
         if max_queue_size < 1:
             raise ValueError("max_queue_size must be at least 1")
+        if idle_timeout_seconds < 0:
+            raise ValueError("idle_timeout_seconds cannot be negative")
         self.extractor = extractor
         self.max_queue_size = max_queue_size
         self.audio_source_factory = audio_source_factory
+        self.idle_timeout_seconds = idle_timeout_seconds
         self._players: dict[int, GuildMusicPlayer] = {}
 
     def get_player(self, guild_id: int) -> GuildMusicPlayer:
@@ -152,16 +161,28 @@ class MusicService:
     async def connect(self, guild_id: int, channel: VoiceChannel) -> VoiceClient:
         """Connect to a voice channel or move the existing guild client."""
         player = self.get_player(guild_id)
+        stale_task: asyncio.Task[None] | None = None
         async with player.lock:
+            if player.idle_disconnect_task is not None:
+                player.idle_disconnect_task.cancel()
+                player.idle_disconnect_task = None
             voice_client = player.voice_client
             if voice_client is not None and voice_client.is_connected():
                 if voice_client.channel.id != channel.id:
                     await voice_client.move_to(channel)
                 return voice_client
 
+            if player.playback_task is not None and not player.playback_task.done():
+                stale_task = player.playback_task
+                stale_task.cancel()
+                player.playback_task = None
+                player.current = None
             voice_client = await channel.connect()
             player.voice_client = voice_client
-            return voice_client
+        if stale_task is not None:
+            with contextlib.suppress(asyncio.CancelledError):
+                await stale_task
+        return voice_client
 
     async def connected_channel_id(self, guild_id: int) -> int | None:
         """Return the connected channel ID, ignoring stale voice clients."""
@@ -220,10 +241,18 @@ class MusicService:
                         if player.current is track:
                             player.current = None
         finally:
+            schedule_idle_disconnect = False
             async with player.lock:
                 current_task = asyncio.current_task()
                 if player.playback_task is current_task:
                     player.playback_task = None
+                    schedule_idle_disconnect = (
+                        player.voice_client is not None
+                        and player.voice_client.is_connected()
+                        and not player.queue
+                    )
+            if schedule_idle_disconnect:
+                await self.schedule_idle_disconnect(player.guild_id)
 
     async def _play_track(
         self,
@@ -293,7 +322,7 @@ class MusicService:
         await self.start_playback(guild_id)
         return track
 
-    async def stop(self, guild_id: int) -> bool:
+    async def stop(self, guild_id: int, *, schedule_idle: bool = True) -> bool:
         """Stop playback and clear the guild queue, keeping voice connected."""
         player = self.get_player(guild_id)
         async with player.lock:
@@ -316,16 +345,87 @@ class MusicService:
             task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await task
+        if schedule_idle:
+            await self.schedule_idle_disconnect(guild_id)
         return had_music
 
     async def leave(self, guild_id: int) -> bool:
         """Clear playback state and disconnect the guild voice client."""
-        await self.stop(guild_id)
+        await self.stop(guild_id, schedule_idle=False)
         player = self.get_player(guild_id)
         async with player.lock:
+            idle_task = player.idle_disconnect_task
+            if idle_task is not None and idle_task is not asyncio.current_task():
+                idle_task.cancel()
+            player.idle_disconnect_task = None
             voice_client = player.voice_client
             player.voice_client = None
         if voice_client is None or not voice_client.is_connected():
             return False
         await voice_client.disconnect(force=True)
         return True
+
+    async def schedule_idle_disconnect(
+        self,
+        guild_id: int,
+        *,
+        stop_playback: bool = False,
+    ) -> bool:
+        """Schedule a delayed disconnect for an empty queue or empty channel."""
+        player = self.get_player(guild_id)
+        async with player.lock:
+            voice_client = player.voice_client
+            if voice_client is None or not voice_client.is_connected():
+                return False
+            existing = player.idle_disconnect_task
+            if existing is not None:
+                existing.cancel()
+            player.idle_disconnect_task = asyncio.create_task(
+                self._idle_disconnect_worker(player, stop_playback=stop_playback),
+                name=f"music-idle-{guild_id}",
+            )
+            return True
+
+    async def cancel_idle_disconnect(self, guild_id: int) -> bool:
+        """Cancel a guild's pending automatic disconnect."""
+        player = self.get_player(guild_id)
+        async with player.lock:
+            task = player.idle_disconnect_task
+            if task is None:
+                return False
+            task.cancel()
+            player.idle_disconnect_task = None
+            return True
+
+    async def _idle_disconnect_worker(
+        self,
+        player: GuildMusicPlayer,
+        *,
+        stop_playback: bool,
+    ) -> None:
+        try:
+            await asyncio.sleep(self.idle_timeout_seconds)
+            async with player.lock:
+                if not stop_playback and (player.current is not None or player.queue):
+                    return
+                if player.idle_disconnect_task is asyncio.current_task():
+                    player.idle_disconnect_task = None
+            await self.leave(player.guild_id)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception(
+                "Automatic voice disconnect failed in guild %s", player.guild_id
+            )
+        finally:
+            async with player.lock:
+                if player.idle_disconnect_task is asyncio.current_task():
+                    player.idle_disconnect_task = None
+
+    async def shutdown(self) -> None:
+        """Cancel music tasks and disconnect all guild voice clients."""
+        for guild_id in tuple(self._players):
+            try:
+                await self.leave(guild_id)
+            except Exception:
+                logger.exception("Music shutdown failed in guild %s", guild_id)

@@ -24,6 +24,5 @@ class Track:
         """Return a user-facing duration such as ``3:05`` or ``LIVE``."""
         if self.duration_seconds is None:
             return "LIVE"
-        minute,second = divmod(self.duration_seconds, 60)
+        minute, second = divmod(self.duration_seconds, 60)
         return f"{minute}:{second:02d}"
-

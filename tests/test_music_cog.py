@@ -107,3 +107,48 @@ class MusicCogTests(unittest.IsolatedAsyncioTestCase):
         message = self.interaction.followup.send.await_args.args[0]
         self.assertIn("재생을 시작합니다", message)
         self.assertIn("requested song", message)
+
+    async def test_last_human_leaving_schedules_disconnect(self) -> None:
+        class FakeVoiceChannel:
+            id = 10
+            members = [SimpleNamespace(bot=True)]
+
+        guild = SimpleNamespace(
+            id=1,
+            get_channel=lambda channel_id: FakeVoiceChannel(),
+        )
+        member = SimpleNamespace(bot=False, guild=guild)
+        before = SimpleNamespace(channel=SimpleNamespace(id=10))
+        after = SimpleNamespace(channel=None)
+        self.service.connected_channel_id = AsyncMock(return_value=10)
+        self.service.schedule_idle_disconnect = AsyncMock()
+
+        with patch("src.cogs.music.discord.VoiceChannel", FakeVoiceChannel):
+            await self.cog.on_voice_state_update(member, before, after)
+
+        self.service.schedule_idle_disconnect.assert_awaited_once_with(
+            1,
+            stop_playback=True,
+        )
+
+    async def test_human_joining_cancels_disconnect(self) -> None:
+        human = SimpleNamespace(bot=False)
+
+        class FakeVoiceChannel:
+            id = 10
+            members = [SimpleNamespace(bot=True), human]
+
+        guild = SimpleNamespace(
+            id=1,
+            get_channel=lambda channel_id: FakeVoiceChannel(),
+        )
+        member = SimpleNamespace(bot=False, guild=guild)
+        before = SimpleNamespace(channel=None)
+        after = SimpleNamespace(channel=SimpleNamespace(id=10))
+        self.service.connected_channel_id = AsyncMock(return_value=10)
+        self.service.cancel_idle_disconnect = AsyncMock()
+
+        with patch("src.cogs.music.discord.VoiceChannel", FakeVoiceChannel):
+            await self.cog.on_voice_state_update(member, before, after)
+
+        self.service.cancel_idle_disconnect.assert_awaited_once_with(1)

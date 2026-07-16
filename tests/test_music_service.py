@@ -1,4 +1,5 @@
 import asyncio
+import contextlib
 import unittest
 
 from src.domain.music import Track
@@ -115,6 +116,9 @@ class MusicServiceTests(unittest.IsolatedAsyncioTestCase):
             audio_source_factory=create_source,
         )
 
+    async def asyncTearDown(self) -> None:
+        await self.service.shutdown()
+
     def test_returns_one_persistent_player_per_guild(self) -> None:
         first = self.service.get_player(1)
         same = self.service.get_player(1)
@@ -172,6 +176,10 @@ class MusicServiceTests(unittest.IsolatedAsyncioTestCase):
     def test_rejects_invalid_queue_limit(self) -> None:
         with self.assertRaisesRegex(ValueError, "at least 1"):
             MusicService(FakeMediaExtractor(), max_queue_size=0)
+
+    def test_rejects_invalid_idle_timeout(self) -> None:
+        with self.assertRaisesRegex(ValueError, "cannot be negative"):
+            MusicService(FakeMediaExtractor(), idle_timeout_seconds=-1)
 
     async def test_connects_and_stores_voice_client(self) -> None:
         channel = FakeVoiceChannel(10)
@@ -373,3 +381,109 @@ class MusicServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(self.service.get_player(1).voice_client)
         self.assertIsNone(await self.service.connected_channel_id(1))
         self.assertFalse(await self.service.leave(1))
+
+    async def test_idle_timeout_disconnects_empty_player(self) -> None:
+        self.service.idle_timeout_seconds = 0
+        channel = FakeVoiceChannel(10)
+        await self.service.connect(1, channel)
+
+        self.assertTrue(await self.service.schedule_idle_disconnect(1))
+        idle_task = self.service.get_player(1).idle_disconnect_task
+        self.assertIsNotNone(idle_task)
+        await idle_task
+
+        self.assertTrue(channel.client.disconnected)
+        self.assertIsNone(self.service.get_player(1).idle_disconnect_task)
+
+    async def test_enqueue_cancels_pending_idle_disconnect(self) -> None:
+        channel = FakeVoiceChannel(10)
+        await self.service.connect(1, channel)
+        await self.service.schedule_idle_disconnect(1)
+        idle_task = self.service.get_player(1).idle_disconnect_task
+
+        await self.service.enqueue(1, "new track", 100)
+
+        self.assertIsNotNone(idle_task)
+        with contextlib.suppress(asyncio.CancelledError):
+            await idle_task
+        self.assertIsNone(self.service.get_player(1).idle_disconnect_task)
+        self.assertTrue(channel.client.is_connected())
+
+    async def test_empty_channel_timeout_stops_playback_and_disconnects(self) -> None:
+        self.service.idle_timeout_seconds = 0
+        channel = FakeVoiceChannel(10)
+        channel.client.auto_finish = False
+        await self.service.connect(1, channel)
+        await self.service.enqueue(1, "first", 100)
+        await self.service.start_playback(1)
+        await asyncio.sleep(0)
+
+        await self.service.schedule_idle_disconnect(1, stop_playback=True)
+        idle_task = self.service.get_player(1).idle_disconnect_task
+        self.assertIsNotNone(idle_task)
+        await idle_task
+
+        self.assertTrue(channel.client.disconnected)
+        snapshot = await self.service.queue_snapshot(1)
+        self.assertIsNone(snapshot.current)
+        self.assertEqual(snapshot.queued, ())
+
+    async def test_reconnect_cancels_stale_playback_task(self) -> None:
+        stale_channel = FakeVoiceChannel(10)
+        stale_channel.client.connected = False
+        new_channel = FakeVoiceChannel(20)
+        player = self.service.get_player(1)
+        stale_task = asyncio.create_task(asyncio.Event().wait())
+        player.voice_client = stale_channel.client
+        player.playback_task = stale_task
+        player.current = Track("stale", "https://example.com/stale", 100, 60)
+
+        await self.service.connect(1, new_channel)
+
+        self.assertTrue(stale_task.cancelled())
+        self.assertIsNone(player.current)
+        self.assertIs(player.voice_client, new_channel.client)
+
+    async def test_concurrent_requests_share_one_playback_worker(self) -> None:
+        channel = FakeVoiceChannel(10)
+        channel.client.auto_finish = False
+        await self.service.connect(1, channel)
+
+        async def request(track_name: str) -> None:
+            await self.service.enqueue(1, track_name, 100)
+            await self.service.start_playback(1)
+
+        await asyncio.gather(request("first"), request("second"))
+        await asyncio.sleep(0)
+
+        player = self.service.get_player(1)
+        self.assertIsNotNone(player.playback_task)
+        snapshot = await self.service.queue_snapshot(1)
+        all_tracks = [snapshot.current, *snapshot.queued]
+        self.assertEqual(
+            {track.title for track in all_tracks if track is not None},
+            {"first", "second"},
+        )
+        await self.service.stop(1)
+
+    async def test_ffmpeg_callback_error_continues_to_next_track(self) -> None:
+        channel = FakeVoiceChannel(10)
+        channel.client.auto_finish = False
+        await self.service.connect(1, channel)
+        await self.service.enqueue(1, "first", 100)
+        await self.service.enqueue(1, "second", 100)
+        await self.service.start_playback(1)
+        await asyncio.sleep(0)
+
+        with self.assertLogs("src.services.music", level="ERROR"):
+            channel.client.finish(RuntimeError("ffmpeg failed"))
+            for _ in range(10):
+                await asyncio.sleep(0)
+                if len(channel.client.sources) == 2:
+                    break
+
+        self.assertEqual(len(channel.client.sources), 2)
+        playback_task = self.service.get_player(1).playback_task
+        channel.client.finish()
+        self.assertIsNotNone(playback_task)
+        await playback_task

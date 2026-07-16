@@ -9,10 +9,13 @@ from discord.ext import commands
 from src.cloud.gcp_instance import GcpInstanceController
 from src.cogs.ai_chat import AiChatCog
 from src.cogs.general import GeneralCog
+from src.cogs.music import MusicCog
 from src.cogs.palworld import PalworldCog
 from src.config.settings import Settings
+from src.integrations.media_extractor import YtDlpMediaExtractor
 from src.security.access_policy import ServerControlPolicy
 from src.services.chat_sessions import ChatSessionManager
+from src.services.music import MusicService
 from src.services.palworld import PalworldService
 
 
@@ -33,6 +36,7 @@ class DiscordBot(commands.Bot):
         self._synced_guild_ids: set[int] = set()
 
         self.chat_sessions = ChatSessionManager(settings.ai)
+        self.music_service = MusicService(YtDlpMediaExtractor())
         self.palworld_service: PalworldService | None = None
         if settings.gcp.enabled:
             try:
@@ -44,6 +48,7 @@ class DiscordBot(commands.Bot):
     async def setup_hook(self) -> None:
         await self.add_cog(AiChatCog(self, self.settings.ai, self.chat_sessions))
         await self.add_cog(GeneralCog(self))
+        await self.add_cog(MusicCog(self.music_service))
         await self.add_cog(
             PalworldCog(
                 self.palworld_service,
@@ -89,3 +94,7 @@ class DiscordBot(commands.Bot):
             )
         except Exception:
             self.logger.exception("Discord command sync failed for guild %s", guild.id)
+
+    async def close(self) -> None:
+        await self.music_service.shutdown()
+        await super().close()

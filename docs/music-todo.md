@@ -2,7 +2,8 @@
 
 이 문서는 음악 기능을 한 단계씩 직접 구현하기 위한 작업 순서입니다. 각 항목의 `MUSIC-n` 번호는 소스 코드의 `TODO(MUSIC-n)` 주석과 연결됩니다.
 
-음악 기능이 완성되기 전까지 `MusicCog`는 `DiscordBot.setup_hook()`에서 로드하지 않습니다. 따라서 중간 단계에서도 기존 AI 채팅과 Palworld 명령어는 계속 정상 작동합니다.
+MUSIC-7에서 `MusicCog`를 `DiscordBot.setup_hook()`에 장착했습니다. NAS에 새 이미지를
+배포하면 기존 AI 채팅·Palworld 명령어와 음악 명령어가 함께 등록됩니다.
 
 ## 목표 명령어
 
@@ -125,31 +126,31 @@ MUSIC-5의 음성 의존성 설치와 MUSIC-7의 Cog 장착 후 통합 테스트
 
 파일: `src/bot/bot.py`
 
-- [ ] `MediaExtractor` 생성
-- [ ] `MusicService` 생성
-- [ ] `MusicCog` import
-- [ ] `setup_hook()`에서 `await self.add_cog(...)` 호출
-- [ ] `tests/test_bot_commands.py` 예상 명령어에 음악 명령 추가
-- [ ] `/help`에 음악 명령이 자동 표시되는지 확인
+- [x] `MediaExtractor` 생성
+- [x] `MusicService` 생성
+- [x] `MusicCog` import
+- [x] `setup_hook()`에서 `await self.add_cog(...)` 호출
+- [x] `tests/test_bot_commands.py` 예상 명령어에 음악 명령 추가
+- [x] `/help`가 전역 명령 목록에서 음악 명령을 자동으로 표시
 
 이 단계는 MUSIC-1부터 MUSIC-6까지 동작한 뒤 진행합니다.
 
 ## 8. 자동 퇴장과 안정성 — MUSIC-8
 
-- [ ] 큐가 빈 상태로 5분이 지나면 자동 퇴장
-- [ ] 봇만 음성 채널에 남으면 자동 퇴장할지 결정
-- [ ] 곡 최대 길이 제한 검토
-- [ ] 큐 길이 제한
-- [ ] 중복 `/music_play` 요청 동시성 테스트
-- [ ] yt-dlp 및 FFmpeg 실패 후 플레이어가 멈추지 않는지 테스트
-- [ ] 봇 재연결 시 오래된 `VoiceClient` 상태 정리
+- [x] 큐가 빈 상태로 5분이 지나면 자동 퇴장
+- [x] 봇만 음성 채널에 남으면 5분 유예 후 자동 퇴장
+- [x] 곡 최대 길이는 제한하지 않기로 결정
+- [x] 큐 길이를 50곡으로 제한
+- [x] 중복 `/music_play` 요청 동시성 테스트
+- [x] yt-dlp 및 FFmpeg 실패 후 다음 곡으로 진행하는 테스트
+- [x] 봇 재연결 시 오래된 재생 작업과 `VoiceClient` 상태 정리
 
 ## NAS 배포 체크리스트
 
 음악 기능은 Python 패키지와 FFmpeg가 새로 필요하므로 최초 한 번은 이미지 재빌드가 필요합니다.
 
-- [ ] `requirements.txt` 변경
-- [ ] `Dockerfile`에 FFmpeg 설치
+- [x] `requirements.txt` 변경
+- [x] `Dockerfile`에 FFmpeg 설치
 - [ ] NAS에 전체 `src` 폴더 업로드
 - [ ] 이미지 재빌드
 - [ ] 컨테이너 로그에서 음성 관련 오류 확인

@@ -1,8 +1,4 @@
-"""Discord slash commands for music playback.
-
-This Cog is intentionally not loaded by ``DiscordBot`` yet. Complete
-TODO(MUSIC-1) through TODO(MUSIC-6), then load it in TODO(MUSIC-7).
-"""
+"""Discord slash commands and voice-state handling for music playback."""
 
 import logging
 
@@ -74,6 +70,42 @@ class MusicCog(commands.Cog):
             )
             return False
         return True
+
+    @commands.Cog.listener()
+    async def on_voice_state_update(
+        self,
+        member: discord.Member,
+        before: discord.VoiceState,
+        after: discord.VoiceState,
+    ) -> None:
+        """Start or cancel the grace timer when humans leave or join."""
+        if member.bot:
+            return
+        channel_id = await self.service.connected_channel_id(member.guild.id)
+        if channel_id is None:
+            return
+
+        affected_channel_ids = {
+            channel.id
+            for channel in (before.channel, after.channel)
+            if channel is not None
+        }
+        if channel_id not in affected_channel_ids:
+            return
+
+        channel = member.guild.get_channel(channel_id)
+        if not isinstance(channel, discord.VoiceChannel):
+            return
+        has_human_listener = any(
+            not voice_member.bot for voice_member in channel.members
+        )
+        if has_human_listener:
+            await self.service.cancel_idle_disconnect(member.guild.id)
+        else:
+            await self.service.schedule_idle_disconnect(
+                member.guild.id,
+                stop_playback=True,
+            )
 
     @app_commands.command(
         name="music_play", description="음악을 검색하거나 큐에 추가합니다"

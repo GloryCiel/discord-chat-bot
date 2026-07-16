@@ -25,9 +25,26 @@ class BotCommandTests(unittest.IsolatedAsyncioTestCase):
                 "chat",
                 "end",
                 "help",
+                "music_leave",
+                "music_pause",
+                "music_play",
+                "music_queue",
+                "music_resume",
+                "music_skip",
+                "music_stop",
                 "pal_server_start",
                 "pal_server_status",
                 "pal_server_stop",
             },
         )
+
+        general_cog = bot.get_cog("GeneralCog")
+        self.assertIsNotNone(general_cog)
+        interaction = SimpleNamespace(
+            response=SimpleNamespace(send_message=AsyncMock())
+        )
+        await general_cog.help_command.callback(general_cog, interaction)
+        help_message = interaction.response.send_message.await_args.args[0]
+        self.assertIn("`/music_play`", help_message)
+        self.assertIn("`/music_leave`", help_message)
         await bot.close()
