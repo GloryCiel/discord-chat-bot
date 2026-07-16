@@ -41,3 +41,6 @@ ENV/
 # Discord bot specific
 config.json
 token.json 
+
+# Local secrets
+secrets/
