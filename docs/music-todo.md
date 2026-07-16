@@ -81,11 +81,15 @@ Track(..., duration_seconds=None).duration_label == "LIVE"
 
 파일: `src/cogs/music.py`, `src/services/music.py`
 
-- [ ] 명령어 사용자가 음성 채널에 있는지 검사
-- [ ] 봇이 연결되지 않았으면 사용자 채널에 입장
-- [ ] 다른 채널에 있다면 정책 결정: 이동하거나 오류 반환
-- [ ] 봇에 `Connect`, `Speak`, `View Channel` 권한이 있는지 확인
-- [ ] 서버별 `VoiceClient`를 `GuildMusicPlayer`에 연결
+- [x] 명령어 사용자가 음성 채널에 있는지 검사
+- [x] 봇이 연결되지 않았으면 사용자 채널에 입장
+- [x] 다른 채널에 있다면 명령어 사용자의 채널로 이동
+- [x] 봇에 `Connect`, `Speak`, `View Channel` 권한이 있는지 확인
+- [x] 서버별 `VoiceClient`를 `GuildMusicPlayer`에 연결
+
+재생 제어 명령은 봇과 같은 음성 채널에 있는 사용자만 사용할 수 있고,
+`/music_queue` 조회는 음성 채널 밖에서도 허용합니다. 실제 Discord 음성 연결은
+MUSIC-5의 음성 의존성 설치와 MUSIC-7의 Cog 장착 후 통합 테스트합니다.
 
 처음에는 “명령어 사용자가 있는 채널로 이동” 정책이 가장 단순합니다.
 

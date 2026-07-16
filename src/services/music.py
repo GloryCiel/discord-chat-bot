@@ -3,9 +3,28 @@
 import asyncio
 from collections import deque
 from dataclasses import dataclass, field
+from typing import Protocol
 
 from src.domain.music import Track
 from src.integrations.media_extractor import MediaExtractor
+
+
+class VoiceChannel(Protocol):
+    """Minimum Discord voice-channel interface used by the service."""
+
+    id: int
+
+    async def connect(self) -> "VoiceClient": ...
+
+
+class VoiceClient(Protocol):
+    """Minimum Discord voice-client interface used by the service."""
+
+    channel: VoiceChannel
+
+    def is_connected(self) -> bool: ...
+
+    async def move_to(self, channel: VoiceChannel) -> None: ...
 
 
 class MusicQueueFullError(RuntimeError):
@@ -34,6 +53,7 @@ class GuildMusicPlayer:
     max_queue_size: int = 50
     queue: deque[Track] = field(default_factory=deque)
     current: Track | None = None
+    voice_client: VoiceClient | None = None
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
     async def enqueue(self, track: Track) -> int:
@@ -49,7 +69,6 @@ class GuildMusicPlayer:
         async with self.lock:
             return QueueSnapshot(current=self.current, queued=tuple(self.queue))
 
-    # TODO(MUSIC-4): Store or receive the guild VoiceClient.
     # TODO(MUSIC-5): Add a playback worker and next-track signal.
     # TODO(MUSIC-8): Add an idle-disconnect task.
 
@@ -84,5 +103,28 @@ class MusicService:
 
     async def queue_snapshot(self, guild_id: int) -> QueueSnapshot:
         return await self.get_player(guild_id).snapshot()
+
+    async def connect(self, guild_id: int, channel: VoiceChannel) -> VoiceClient:
+        """Connect to a voice channel or move the existing guild client."""
+        player = self.get_player(guild_id)
+        async with player.lock:
+            voice_client = player.voice_client
+            if voice_client is not None and voice_client.is_connected():
+                if voice_client.channel.id != channel.id:
+                    await voice_client.move_to(channel)
+                return voice_client
+
+            voice_client = await channel.connect()
+            player.voice_client = voice_client
+            return voice_client
+
+    async def connected_channel_id(self, guild_id: int) -> int | None:
+        """Return the connected channel ID, ignoring stale voice clients."""
+        player = self.get_player(guild_id)
+        async with player.lock:
+            voice_client = player.voice_client
+            if voice_client is None or not voice_client.is_connected():
+                return None
+            return voice_client.channel.id
 
     # TODO(MUSIC-5): Implement play_next, pause, resume, skip, stop, and leave.
