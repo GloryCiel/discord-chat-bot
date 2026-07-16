@@ -108,13 +108,16 @@ class DiscordBot(discord.Client):
             `/chat` - AI와의 대화 시작
             `/end` - AI와의 대화 종료
             `/help` - 도움말 표시
+            `/pal_server_status` - 팰월드 서버 상태 확인
+            `/pal_server_start` - 팰월드 서버 시작
+            `/pal_server_stop` - 팰월드 저장 후 서버 종료
             
             **일반 채팅:**
             `/chat` 명령어를 사용한 사용자만 AI와 대화할 수 있습니다.
             """
             await interaction.response.send_message(help_text)
 
-        @self.tree.command(name="팰서버-상태", description="팰월드 GCP 서버 상태를 확인합니다")
+        @self.tree.command(name="pal_server_status", description="팰월드 GCP 서버 상태를 확인합니다")
         async def pal_server_status(interaction: discord.Interaction):
             if not await self.require_server_control(interaction):
                 return
@@ -126,7 +129,7 @@ class DiscordBot(discord.Client):
                 print(f"GCP status error: {exc}")
                 await interaction.followup.send("GCP 서버 상태 확인에 실패했습니다.")
 
-        @self.tree.command(name="팰서버-시작", description="팰월드 GCP 서버를 시작합니다")
+        @self.tree.command(name="pal_server_start", description="팰월드 GCP 서버를 시작합니다")
         async def pal_server_start(interaction: discord.Interaction):
             if not await self.require_server_control(interaction):
                 return
@@ -144,7 +147,7 @@ class DiscordBot(discord.Client):
                 print(f"GCP start error: {exc}")
                 await interaction.followup.send("GCP 서버 시작에 실패했습니다.")
 
-        @self.tree.command(name="팰서버-종료", description="팰월드를 저장하고 GCP 서버를 종료합니다")
+        @self.tree.command(name="pal_server_stop", description="팰월드를 저장하고 GCP 서버를 종료합니다")
         @app_commands.describe(confirm="접속자가 모두 나갔고 종료해도 되면 체크")
         async def pal_server_stop(
             interaction: discord.Interaction, confirm: bool = False
