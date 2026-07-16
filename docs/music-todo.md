@@ -47,15 +47,15 @@ Track(..., duration_seconds=None).duration_label == "LIVE"
 
 파일: `src/integrations/media_extractor.py`
 
-- [ ] `requirements.txt`에 `yt-dlp` 추가
-- [ ] `YoutubeDL` 옵션 구성
-- [ ] URL이면 해당 URL을 조회
-- [ ] 검색어이면 `ytsearch1:<검색어>`로 첫 결과 조회
-- [ ] 재생목록 전체가 큐에 들어오지 않도록 `noplaylist=True` 설정
-- [ ] 동기식 yt-dlp 호출을 `asyncio.to_thread()`로 실행
-- [ ] 결과를 `Track`으로 변환
-- [ ] 직접 스트림 URL은 큐에 저장하지 않고 `get_stream_url()` 호출 시 새로 추출
-- [ ] 비공개·삭제·검색 실패를 이해하기 쉬운 예외로 변환
+- [x] `requirements.txt`에 `yt-dlp` 추가
+- [x] `YoutubeDL` 옵션 구성
+- [x] URL이면 해당 URL을 조회
+- [x] 검색어이면 `ytsearch1:<검색어>`로 첫 결과 조회
+- [x] 재생목록 전체가 큐에 들어오지 않도록 `noplaylist=True` 설정
+- [x] 동기식 yt-dlp 호출을 `asyncio.to_thread()`로 실행
+- [x] 결과를 `Track`으로 변환
+- [x] 직접 스트림 URL은 큐에 저장하지 않고 `get_stream_url()` 호출 시 새로 추출
+- [x] 비공개·삭제·검색 실패를 이해하기 쉬운 예외로 변환
 
 중요: 스트림 URL은 만료될 수 있으므로 `Track`에는 원본 페이지 URL만 저장합니다.
 
