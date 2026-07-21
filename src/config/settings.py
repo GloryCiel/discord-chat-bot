@@ -33,6 +33,9 @@ class GcpSettings:
     instance_name: str
     service_account_json_base64: Optional[str]
     application_credentials: Optional[str]
+    game_metadata_key: str = "active-game"
+    palworld_port: int = 8211
+    rust_port: int = 28015
 
     @property
     def enabled(self) -> bool:
@@ -67,6 +70,9 @@ class Settings:
             instance_name=os.getenv("GCP_INSTANCE_NAME", ""),
             service_account_json_base64=os.getenv("GCP_SERVICE_ACCOUNT_JSON_BASE64"),
             application_credentials=os.getenv("GOOGLE_APPLICATION_CREDENTIALS"),
+            game_metadata_key=os.getenv("GCP_GAME_METADATA_KEY", "active-game"),
+            palworld_port=self._int(os.getenv("PALWORLD_PORT", "8211")),
+            rust_port=self._int(os.getenv("RUST_PORT", "28015")),
         )
 
     @staticmethod
@@ -77,6 +83,13 @@ class Settings:
             return int(value)
         except ValueError as exc:
             raise ValueError(f"Expected an integer ID, got: {value}") from exc
+
+    @staticmethod
+    def _int(value: str) -> int:
+        try:
+            return int(value)
+        except ValueError as exc:
+            raise ValueError(f"Expected an integer, got: {value}") from exc
 
     @staticmethod
     def _int_set(value: str) -> frozenset[int]:

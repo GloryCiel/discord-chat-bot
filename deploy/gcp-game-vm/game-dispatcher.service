@@ -1,0 +1,14 @@
+[Unit]
+Description=Start the game selected in GCP instance metadata
+Wants=network-online.target
+After=network-online.target
+ConditionVirtualization=google
+
+[Service]
+Type=oneshot
+Environment=GAME_METADATA_KEY=active-game
+ExecStart=/usr/local/sbin/game-dispatcher
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

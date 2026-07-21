@@ -32,9 +32,9 @@ class BotCommandTests(unittest.IsolatedAsyncioTestCase):
                 "music_resume",
                 "music_skip",
                 "music_stop",
-                "pal_server_start",
-                "pal_server_status",
-                "pal_server_stop",
+                "game_server_start",
+                "game_server_status",
+                "game_server_stop",
             },
         )
 

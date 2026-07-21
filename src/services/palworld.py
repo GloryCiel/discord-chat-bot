@@ -1,16 +1,16 @@
-"""Palworld VM orchestration independent from Discord interactions."""
+"""Selectable game VM orchestration independent from Discord interactions."""
 
 import asyncio
 from dataclasses import dataclass
 from typing import Protocol
 
-from src.domain.palworld import InstanceState
+from src.domain.palworld import GameKind, InstanceState
 
 
 class InstanceController(Protocol):
     async def get(self) -> InstanceState: ...
 
-    async def start(self) -> InstanceState: ...
+    async def start(self, game: GameKind) -> InstanceState: ...
 
     async def stop(self) -> InstanceState: ...
 
@@ -27,7 +27,18 @@ class StopResult:
     already_stopped: bool
 
 
-class PalworldService:
+class GameSwitchRequired(RuntimeError):
+    def __init__(self, current: GameKind | None, requested: GameKind):
+        self.current = current
+        self.requested = requested
+        current_name = current.value if current else "unknown"
+        super().__init__(
+            f"VM is already running {current_name}; stop it before starting "
+            f"{requested.value}"
+        )
+
+
+class GameServerService:
     def __init__(self, controller: InstanceController):
         self.controller = controller
         self._operation_lock = asyncio.Lock()
@@ -35,12 +46,14 @@ class PalworldService:
     async def status(self) -> InstanceState:
         return await self.controller.get()
 
-    async def start(self) -> StartResult:
+    async def start(self, game: GameKind) -> StartResult:
         async with self._operation_lock:
             before = await self.controller.get()
             if before.status == "RUNNING":
+                if before.selected_game != game:
+                    raise GameSwitchRequired(before.selected_game, game)
                 return StartResult(state=before, already_running=True)
-            state = await self.controller.start()
+            state = await self.controller.start(game)
             return StartResult(state=state, already_running=False)
 
     async def stop(self) -> StopResult:
@@ -50,3 +63,7 @@ class PalworldService:
                 return StopResult(state=before, already_stopped=True)
             state = await self.controller.stop()
             return StopResult(state=state, already_stopped=False)
+
+
+# Backward-compatible import for callers that have not migrated yet.
+PalworldService = GameServerService

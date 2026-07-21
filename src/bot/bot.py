@@ -10,13 +10,13 @@ from src.cloud.gcp_instance import GcpInstanceController
 from src.cogs.ai_chat import AiChatCog
 from src.cogs.general import GeneralCog
 from src.cogs.music import MusicCog
-from src.cogs.palworld import PalworldCog
+from src.cogs.palworld import GameServerCog
 from src.config.settings import Settings
 from src.integrations.media_extractor import YtDlpMediaExtractor
 from src.security.access_policy import ServerControlPolicy
 from src.services.chat_sessions import ChatSessionManager
 from src.services.music import MusicService
-from src.services.palworld import PalworldService
+from src.services.palworld import GameServerService
 
 
 class DiscordBot(commands.Bot):
@@ -37,11 +37,11 @@ class DiscordBot(commands.Bot):
 
         self.chat_sessions = ChatSessionManager(settings.ai)
         self.music_service = MusicService(YtDlpMediaExtractor())
-        self.palworld_service: PalworldService | None = None
+        self.game_server_service: GameServerService | None = None
         if settings.gcp.enabled:
             try:
                 controller = GcpInstanceController(settings.gcp)
-                self.palworld_service = PalworldService(controller)
+                self.game_server_service = GameServerService(controller)
             except Exception:
                 self.logger.exception("GCP server control initialization failed")
 
@@ -50,9 +50,11 @@ class DiscordBot(commands.Bot):
         await self.add_cog(GeneralCog(self))
         await self.add_cog(MusicCog(self.music_service))
         await self.add_cog(
-            PalworldCog(
-                self.palworld_service,
+            GameServerCog(
+                self.game_server_service,
                 ServerControlPolicy(self.settings.discord),
+                palworld_port=self.settings.gcp.palworld_port,
+                rust_port=self.settings.gcp.rust_port,
             )
         )
 
@@ -63,7 +65,7 @@ class DiscordBot(commands.Bot):
         if self.user is None:
             return
         self.logger.info("Logged in as %s (ID: %s)", self.user, self.user.id)
-        if self.palworld_service:
+        if self.game_server_service:
             self.logger.info(
                 "GCP server control enabled: %s/%s/%s",
                 self.settings.gcp.project_id,

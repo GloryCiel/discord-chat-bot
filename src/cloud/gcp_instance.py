@@ -1,4 +1,4 @@
-"""Minimal GCP Compute Engine controller for the Palworld VM."""
+"""GCP Compute Engine controller for a selectable game-server VM."""
 
 import asyncio
 import base64
@@ -8,7 +8,7 @@ from google.cloud import compute_v1
 from google.oauth2 import service_account
 
 from src.config.settings import GcpSettings
-from src.domain.palworld import InstanceState
+from src.domain.palworld import GameKind, InstanceState
 
 
 class GcpInstanceController:
@@ -16,6 +16,7 @@ class GcpInstanceController:
         self.project = settings.project_id
         self.zone = settings.zone
         self.instance_name = settings.instance_name
+        self.game_metadata_key = settings.game_metadata_key
         credentials = self._load_credentials(settings)
         self.client = compute_v1.InstancesClient(credentials=credentials)
 
@@ -47,6 +48,12 @@ class GcpInstanceController:
             instance=self.instance_name,
         )
         external_ip = None
+        selected_game = None
+        if instance.metadata:
+            for item in instance.metadata.items or []:
+                if item.key == self.game_metadata_key:
+                    selected_game = GameKind.parse(item.value)
+                    break
         for interface in instance.network_interfaces:
             for access_config in interface.access_configs:
                 if access_config.nat_i_p:
@@ -54,13 +61,44 @@ class GcpInstanceController:
                     break
             if external_ip:
                 break
-        return InstanceState(status=instance.status, external_ip=external_ip)
+        return InstanceState(
+            status=instance.status,
+            external_ip=external_ip,
+            selected_game=selected_game,
+        )
 
     async def get(self) -> InstanceState:
         return await asyncio.to_thread(self._get_sync)
 
-    async def start(self) -> InstanceState:
+    def _select_game_sync(self, game: GameKind) -> None:
+        instance = self.client.get(
+            project=self.project,
+            zone=self.zone,
+            instance=self.instance_name,
+        )
+        current_metadata = instance.metadata or compute_v1.Metadata()
+        metadata = compute_v1.Metadata()
+        metadata.fingerprint = current_metadata.fingerprint
+        metadata.items = [
+            item
+            for item in (current_metadata.items or [])
+            if item.key != self.game_metadata_key
+        ]
+        selected = compute_v1.Items()
+        selected.key = self.game_metadata_key
+        selected.value = game.value
+        metadata.items.append(selected)
+        operation = self.client.set_metadata(
+            project=self.project,
+            zone=self.zone,
+            instance=self.instance_name,
+            metadata_resource=metadata,
+        )
+        operation.result(timeout=180)
+
+    async def start(self, game: GameKind) -> InstanceState:
         def start_sync() -> None:
+            self._select_game_sync(game)
             operation = self.client.start(
                 project=self.project,
                 zone=self.zone,
