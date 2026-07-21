@@ -28,12 +28,19 @@ switch games.
 
 ## Required GCP permissions
 
-The bot's service account needs only these Compute Engine instance operations:
+Grant the bot's service account a custom role on the VM (or project) containing
+these permissions:
 
-- get instance state and metadata
-- set instance metadata
-- start the instance
-- stop the instance
+- `compute.instances.get`
+- `compute.instances.setMetadata`
+- `compute.instances.start`
+- `compute.instances.stop`
+- `compute.zoneOperations.get`
+
+Starting a VM also requires the bot to act as the service account attached to
+that VM. On the attached service account itself, grant the bot
+`roles/iam.serviceAccountUser` (`iam.serviceAccounts.actAs`). Grant this at the
+service-account resource level instead of project-wide when possible.
 
 Keep the service-account credential on the NAS that runs the Discord bot. Do
 not copy it onto the public game VM.
