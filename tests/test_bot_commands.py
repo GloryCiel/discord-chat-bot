@@ -3,15 +3,14 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 from src.bot.bot import DiscordBot
-from src.config.settings import AiSettings, DiscordSettings, GcpSettings
+from src.config.settings import AiSettings, DiscordSettings
 
 
 class BotCommandTests(unittest.IsolatedAsyncioTestCase):
     async def test_setup_registers_expected_commands(self) -> None:
         settings = SimpleNamespace(
             ai=AiSettings(None, "test-model", "test-prompt"),
-            discord=DiscordSettings("test-token", None, frozenset(), frozenset()),
-            gcp=GcpSettings("", "", "", None, None),
+            discord=DiscordSettings("test-token"),
         )
         bot = DiscordBot(settings)
         bot.tree.sync = AsyncMock(return_value=[])
@@ -32,9 +31,6 @@ class BotCommandTests(unittest.IsolatedAsyncioTestCase):
                 "music_resume",
                 "music_skip",
                 "music_stop",
-                "game_server_start",
-                "game_server_status",
-                "game_server_stop",
             },
         )
 
