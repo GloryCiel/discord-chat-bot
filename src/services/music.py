@@ -3,6 +3,7 @@
 import asyncio
 import contextlib
 import logging
+import shlex
 from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -11,21 +12,27 @@ from typing import Any, Protocol
 import discord
 
 from src.domain.music import Track
-from src.integrations.media_extractor import MediaExtractor
+from src.integrations.media_extractor import MediaExtractor, MediaStream
 
 logger = logging.getLogger(__name__)
 
 FFMPEG_BEFORE_OPTIONS = "-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5"
 FFMPEG_OPTIONS = "-vn -loglevel warning"
 DEFAULT_IDLE_TIMEOUT_SECONDS = 300.0
-AudioSourceFactory = Callable[[str], discord.AudioSource]
+AudioSourceFactory = Callable[[MediaStream], discord.AudioSource]
 
 
-def create_audio_source(stream_url: str) -> discord.AudioSource:
+def create_audio_source(stream: MediaStream) -> discord.AudioSource:
     """Create an Opus audio source backed by the system FFmpeg binary."""
+    before_options = FFMPEG_BEFORE_OPTIONS
+    if stream.http_headers:
+        headers = "".join(
+            f"{name}: {value}\r\n" for name, value in stream.http_headers.items()
+        )
+        before_options = f"{before_options} -headers {shlex.quote(headers)}"
     return discord.FFmpegOpusAudio(
-        stream_url,
-        before_options=FFMPEG_BEFORE_OPTIONS,
+        stream.url,
+        before_options=before_options,
         options=FFMPEG_OPTIONS,
     )
 
@@ -260,8 +267,8 @@ class MusicService:
         voice_client: VoiceClient,
         track: Track,
     ) -> None:
-        stream_url = await self.extractor.get_stream_url(track)
-        source = self.audio_source_factory(stream_url)
+        stream = await self.extractor.get_stream(track)
+        source = self.audio_source_factory(stream)
         finished = asyncio.Event()
         loop = asyncio.get_running_loop()
 

@@ -73,18 +73,56 @@ class YtDlpMediaExtractorTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(track.duration_label, "LIVE")
         self.assertEqual(fixture.calls[0][0], url)
 
-    async def test_resolves_fresh_stream_url_from_webpage_url(self) -> None:
+    async def test_resolves_fresh_stream_with_required_http_headers(self) -> None:
         webpage_url = "https://example.com/watch/3"
         fixture = ExtractorFixture(
-            {webpage_url: {"url": "https://media.example.com/audio-stream"}}
+            {
+                webpage_url: {
+                    "url": "https://media.example.com/audio-stream",
+                    "http_headers": {
+                        "User-Agent": "yt-dlp test agent",
+                        "Referer": "https://www.youtube.com/",
+                    },
+                }
+            }
         )
         extractor = YtDlpMediaExtractor(ydl_factory=fixture.factory)
         track = Track("Song", webpage_url, 1, 30)
 
-        stream_url = await extractor.get_stream_url(track)
+        stream = await extractor.get_stream(track)
 
-        self.assertEqual(stream_url, "https://media.example.com/audio-stream")
+        self.assertEqual(stream.url, "https://media.example.com/audio-stream")
+        self.assertEqual(
+            stream.http_headers,
+            {
+                "User-Agent": "yt-dlp test agent",
+                "Referer": "https://www.youtube.com/",
+            },
+        )
         self.assertEqual(fixture.calls[0][0], webpage_url)
+
+    async def test_sanitizes_stream_http_headers(self) -> None:
+        webpage_url = "https://example.com/watch/4"
+        fixture = ExtractorFixture(
+            {
+                webpage_url: {
+                    "url": "https://media.example.com/audio-stream",
+                    "http_headers": {
+                        "User-Agent": "agent\r\nInjected: value",
+                        "Bad:Name": "ignored",
+                        "X-Number": 123,
+                    },
+                }
+            }
+        )
+        extractor = YtDlpMediaExtractor(ydl_factory=fixture.factory)
+
+        stream = await extractor.get_stream(Track("Song", webpage_url, 1, 30))
+
+        self.assertEqual(
+            stream.http_headers,
+            {"User-Agent": "agent Injected: value"},
+        )
 
     async def test_rejects_empty_query(self) -> None:
         extractor = YtDlpMediaExtractor(ydl_factory=lambda options: None)

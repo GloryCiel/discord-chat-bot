@@ -1,9 +1,12 @@
 import asyncio
 import contextlib
+import shlex
 import unittest
+from unittest.mock import patch
 
 from src.domain.music import Track
-from src.services.music import MusicQueueFullError, MusicService
+from src.integrations.media_extractor import MediaStream
+from src.services.music import MusicQueueFullError, MusicService, create_audio_source
 
 
 class FakeMediaExtractor:
@@ -15,8 +18,11 @@ class FakeMediaExtractor:
             duration_seconds=60,
         )
 
-    async def get_stream_url(self, track: Track) -> str:
-        return f"https://media.example.com/{track.title}"
+    async def get_stream(self, track: Track) -> MediaStream:
+        return MediaStream(
+            url=f"https://media.example.com/{track.title}",
+            http_headers={"User-Agent": "test agent"},
+        )
 
 
 class FakeVoiceClient:
@@ -82,8 +88,9 @@ class FakeVoiceClient:
 
 
 class FakeAudioSource:
-    def __init__(self, stream_url: str):
-        self.stream_url = stream_url
+    def __init__(self, stream: MediaStream):
+        self.stream_url = stream.url
+        self.http_headers = stream.http_headers
         self.cleaned = False
 
     def cleanup(self) -> None:
@@ -105,8 +112,8 @@ class MusicServiceTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self) -> None:
         self.created_sources: list[FakeAudioSource] = []
 
-        def create_source(stream_url: str) -> FakeAudioSource:
-            source = FakeAudioSource(stream_url)
+        def create_source(stream: MediaStream) -> FakeAudioSource:
+            source = FakeAudioSource(stream)
             self.created_sources.append(source)
             return source
 
@@ -180,6 +187,29 @@ class MusicServiceTests(unittest.IsolatedAsyncioTestCase):
     def test_rejects_invalid_idle_timeout(self) -> None:
         with self.assertRaisesRegex(ValueError, "cannot be negative"):
             MusicService(FakeMediaExtractor(), idle_timeout_seconds=-1)
+
+    def test_audio_source_passes_stream_headers_to_ffmpeg(self) -> None:
+        stream = MediaStream(
+            url="https://media.example.com/audio-stream",
+            http_headers={
+                "User-Agent": "yt-dlp test agent",
+                "Referer": "https://www.youtube.com/",
+            },
+        )
+
+        with patch("src.services.music.discord.FFmpegOpusAudio") as ffmpeg:
+            create_audio_source(stream)
+
+        ffmpeg.assert_called_once()
+        args, kwargs = ffmpeg.call_args
+        self.assertEqual(args, (stream.url,))
+        before_options = shlex.split(kwargs["before_options"])
+        self.assertEqual(before_options[-2], "-headers")
+        self.assertEqual(
+            before_options[-1],
+            "User-Agent: yt-dlp test agent\r\n"
+            "Referer: https://www.youtube.com/\r\n",
+        )
 
     async def test_connects_and_stores_voice_client(self) -> None:
         channel = FakeVoiceChannel(10)
@@ -283,10 +313,10 @@ class MusicServiceTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_playback_error_skips_to_next_track(self) -> None:
         class FailingExtractor(FakeMediaExtractor):
-            async def get_stream_url(self, track: Track) -> str:
+            async def get_stream(self, track: Track) -> MediaStream:
                 if track.title == "broken":
                     raise RuntimeError("extraction failed")
-                return await super().get_stream_url(track)
+                return await super().get_stream(track)
 
         self.service.extractor = FailingExtractor()
         channel = FakeVoiceChannel(10)
