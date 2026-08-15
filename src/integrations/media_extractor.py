@@ -1,7 +1,9 @@
 """Media metadata and stream URL extraction with yt-dlp."""
 
 import asyncio
+import re
 from collections.abc import Callable, Mapping
+from dataclasses import dataclass, field
 from typing import Any, Protocol
 from urllib.parse import urlparse
 
@@ -14,10 +16,18 @@ class MediaExtractionError(RuntimeError):
     """A user-facing media lookup or extraction failure."""
 
 
+@dataclass(frozen=True)
+class MediaStream:
+    """A playable media URL and the HTTP headers required to fetch it."""
+
+    url: str
+    http_headers: dict[str, str] = field(default_factory=dict)
+
+
 class MediaExtractor(Protocol):
     async def search(self, query: str, requested_by: int) -> Track: ...
 
-    async def get_stream_url(self, track: Track) -> str: ...
+    async def get_stream(self, track: Track) -> MediaStream: ...
 
 
 YdlFactory = Callable[[dict[str, Any]], Any]
@@ -70,13 +80,16 @@ class YtDlpMediaExtractor:
             duration_seconds=int(duration) if duration is not None else None,
         )
 
-    async def get_stream_url(self, track: Track) -> str:
+    async def get_stream(self, track: Track) -> MediaStream:
         info = await self._extract(track.webpage_url)
         media = self._first_media(info)
         stream_url = media.get("url")
         if not stream_url:
             raise MediaExtractionError("재생 가능한 오디오 주소를 찾지 못했습니다.")
-        return str(stream_url)
+        return MediaStream(
+            url=str(stream_url),
+            http_headers=self._normalize_http_headers(media.get("http_headers")),
+        )
 
     async def _extract(self, target: str) -> dict[str, Any]:
         try:
@@ -102,6 +115,23 @@ class YtDlpMediaExtractor:
         if first is None:
             raise MediaExtractionError("검색 결과가 없습니다.")
         return first
+
+    @staticmethod
+    def _normalize_http_headers(value: Any) -> dict[str, str]:
+        if not isinstance(value, Mapping):
+            return {}
+
+        headers: dict[str, str] = {}
+        for raw_name, raw_value in value.items():
+            if not isinstance(raw_name, str) or not isinstance(raw_value, str):
+                continue
+            name = raw_name.strip()
+            if not re.fullmatch(r"[!#$%&'*+.^_`|~0-9A-Za-z-]+", name):
+                continue
+            normalized_value = re.sub(r"[\r\n]+", " ", raw_value).strip()
+            if normalized_value:
+                headers[name] = normalized_value
+        return headers
 
     @staticmethod
     def _is_http_url(value: str) -> bool:
